@@ -1,4 +1,21 @@
-[GENERAL]
+[DISPLAY]
 contrast = <contrastvalue>
 controller = <controllervalue>
-mode = <modevalue>
+refresh = 2
+
+[MPD]
+socket = /run/mpd/socket
+
+[HIFIBERRY]
+# GPIO pins. remove keys to disable.
+mute = 16
+power = 26
+
+[LEDS]
+# turn on LEDs. remove keys to disable
+volume_down = 23
+volume_up = 24
+previous = 5
+next = 22
+playpause = 6
+

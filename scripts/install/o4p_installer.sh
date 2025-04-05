@@ -1,9 +1,7 @@
 #!/bin/bash
 # Colors: \e[36m=Cyan M ; \e[92m=Light green ; \e[91m=Light red ; \e[93m=Light yellow ; \e[31m=green ; \e[0m=Default ; \e[33m=Yellow ; \e[31m=Red
 
-#Version: 2.0.3 - 20220206
-#branch="development"
-repo="https://github.com/splitti/oled_phoniebox"
+repo="https://github.com/Nexodaru/oled_phoniebox"
 branch="master"
 
 nocolor='\e[0m'
@@ -12,6 +10,32 @@ cyan="\e[1;36m"
 yellow="\e[1;93m"
 green="\e[1;92m"
 installPath="/home/pi/oled_phoniebox"
+
+function install_python_package {
+    package_name=$1
+  	i=0
+  	let lLen="$lineLen"-"${#package_name}"
+  	echo -n -e "   --> $package_name:"
+  	while [ "$i" -lt "$lLen" ]
+  	do
+  		let i+=1
+  		echo -n -e " "
+  	done
+  	pipInstalled=`sudo pip3 show ${package_name}`
+  	if [ "$pipInstalled" = "" ]
+  	then
+  		sudo pip3 install ${package_name}  > /dev/null 2>&1
+  		pipInstalled=`sudo pip3 show ${package_name}`
+  		if [ "$pipInstalled" = "" ]
+  		then
+  			echo -e "${red}failed${nocolor}"
+  		else
+  			echo -e "${green}done${nocolor}"
+  		fi
+  	else
+  		echo -e "${green}already installed${nocolor}"
+  	fi
+}
 
 clear
 echo -e "////////////////////////////////////////////////////////////////////////////////////////////////////////////////"
@@ -137,54 +161,7 @@ do
 done
 
 clear
-echo -e "////////////////////////////////////////////////////////////////////"
-echo -e "///${cyan}   Please choose your display mode:                           ${nocolor}///"
-echo -e "////////////////////////////////////////////////////////////////////"
-echo -e ""
-echo -e "${cyan}Full${nocolor} is a display mode with much informations like"
-echo -e "  -> Tracks and Trackinformations"
-echo -e "  -> Wifi-Signal"
-echo -e ""
-echo -e "${cyan}Lite${nocolor} is a simple display mode just showing the"
-echo -e "Tracknr. and WLAN-Signal, other featues like brightness control are"
-echo -e "still available."
-echo -e ""
-echo -e "${cyan}Mix${nocolor} is a mix between lite and full without"
-echo -e "Trackinformations like Name, Album and so on. Just Tracks, WLAN-"
-echo -e "Signal, Volume and Length."
-echo -e ""
-echo -e "Choose your Display mode.:"
-echo -e " "
-options=("Full" "Lite" "Mix" "Quit")
-select opt in "${options[@]}"
-do
-    case $opt in
-        "Full")
-			echo -e ""
-            mode="full"
-			echo -e " "
-            break
-            ;;
-        "Lite")
-            echo -e ""
-			mode="lite"
-			echo -e " "
-            break
-            ;;
-        "Mix")
-            echo -e ""
-			mode="mix"
-			echo -e " "
-            break
-            ;;
-        "Quit")
-            exit
-            ;;
-        *) echo -e "Invalid option $REPLY";;
-    esac
-done
 
-clear
 cd
 echo -e "////////////////////////////////////////////////////////////////////"
 echo -e "///${cyan}   Check/Install Prerequirements:                             ${nocolor}///"
@@ -208,7 +185,7 @@ do
     esac
 done
 echo -e ""
-echo -e "Starting installation-process, pleae wait, some steps taking"
+echo -e "Starting installation-process, please wait, some steps taking"
 echo -e "minutes, especially the luma-Packages..."
 echo -e ""
 echo -e -n "   --> Update Sources:          "
@@ -219,7 +196,7 @@ echo -e "Install packages..."
 
 lineLen=24
 packages=(git python3 build-essential python3-dev python3-pip libjpeg-dev i2c-tools) # python3-smbus i2c-tools  libfreetype6-dev   python3-pygame libtiff5)
-for p in ${packages[@]}; do
+for p in "${packages[@]}"; do
 	i=0
 	echo -n -e "   --> $p:"
     let lLen="$lineLen"-"${#p}"
@@ -244,30 +221,15 @@ for p in ${packages[@]}; do
 	fi
 done
 lumaPackages=(luma.core luma.oled netifaces)
-for p in ${lumaPackages[@]}; do
-	i=0
-	let lLen="$lineLen"-"${#p}"
-	echo -n -e "   --> $p:"
-	while [ "$i" -lt "$lLen" ]
-	do
-		let i+=1
-		echo -n -e " "
-	done
-	pipInstalled=`sudo pip3 show ${p}`
-	if [ "$pipInstalled" = "" ]
-	then
-		sudo pip3 install ${p}  > /dev/null 2>&1
-		pipInstalled=`sudo pip3 show ${p}`
-		if [ "$pipInstalled" = "" ]
-		then
-			echo -e "${red}failed${nocolor}"
-		else
-			echo -e "${green}done${nocolor}"
-		fi
-	else
-		echo -e "${green}already installed${nocolor}"
-	fi
+for p in "${lumaPackages[@]}"; do
+  install_python_package p
 done
+
+additionalPythonPackages=(pillow python-mpd2 RPi.GPIO)
+for p in "${additionalPythonPackages[@]}"; do
+  install_python_package p
+done
+
 echo -e ""
 echo -e "Enable I2C..."
 if grep -q 'i2c-bcm2708' /etc/modules; then
@@ -330,7 +292,6 @@ echo -e ""
 echo -e "Repository:       ${green}${repo}${nocolor}"
 echo -e "Branch:           ${green}${branch}${nocolor}"
 echo -e "Install Path:     ${green}${installPath}${nocolor}"
-echo -e "Display Mode:     ${green}${mode}${nocolor}"
 echo -e "Controler Type:   ${green}${controller}${nocolor}"
 echo -e "Contrast:         ${green}${contrast}${nocolor}"
 echo -e ""
@@ -353,12 +314,10 @@ echo -e -n "   --> Write Config-File:                 "
 sudo cp ${installPath}/templates/conf.template ${installPath}/oled_phoniebox.conf > /dev/null
 sudo sed -i -e "s:<contrastvalue>:${contrast}:g" ${installPath}/oled_phoniebox.conf> /dev/null
 sudo sed -i -e "s:<controllervalue>:${controller}:g" ${installPath}/oled_phoniebox.conf> /dev/null
-sudo sed -i -e "s:<modevalue>:${mode}:g" ${installPath}/oled_phoniebox.conf> /dev/null
 echo -e "${green}Done${nocolor}"
 echo -e ""
 echo -e -n "   --> Installing Service:                "
 sudo chown -R pi:pi ${installPath} > /dev/null
-#sudo chmod +x ${installPath}/oled_phoniebox.py > /dev/null
 sudo cp ${installPath}/templates/service.template /etc/systemd/oled_phoniebox.service > /dev/null
 sudo chown root:root /etc/systemd/oled_phoniebox.service > /dev/null 2>&1
 sudo chmod 644 /etc/systemd/oled_phoniebox.service > /dev/null 2>&1
@@ -366,7 +325,6 @@ sudo sed -i -e "s:<PATH>:${installPath}:g" /etc/systemd/oled_phoniebox.service >
 sudo systemctl daemon-reload > /dev/null 2>&1
 sudo systemctl enable /etc/systemd/oled_phoniebox.service > /dev/null 2>&1
 sudo service oled_phoniebox restart > /dev/null 2>&1
-sudo service phoniebox-gpio-buttons restart > /dev/null 2>&1
 echo -e "${green}Done${nocolor}"
 echo -e ""
 echo -e -n "   --> Set Permissons:                    "
@@ -375,74 +333,7 @@ echo -e "${green}Done${nocolor}"
 echo -e ""
 read -n 1 -s -r -p "Press any key to continue"
 clear
-echo -e "////////////////////////////////////////////////////////////////////"
-echo -e "///${cyan}   GPIO Buttons Control                                       ${nocolor}///"
-echo -e "////////////////////////////////////////////////////////////////////"
-echo -e ""
-echo -e "If jukebox4kids should be installed already! You have to choose"
-echo -e "between the new GPIO Button Settings in the Phoniebox Repository"
-echo -e "or the old one with enhanced display control features like:"
-echo -e ""
-echo -e "  ${yellow}---> Brightness control${nocolor}"
-echo -e "  ${yellow}---> Status Screen${nocolor}"
-echo -e "  ${yellow}---> OLED mode control${nocolor}"
-echo -e ""
-echo -e "${cyan}Option 1:${nocolor} RECOMMEND"
-echo -e "Install a new Button control service for the Phoniebox & display."
-echo -e "The origin Repository remains untouched, the service will be"
-echo -e "just disabled!"
-echo -e ""
-echo -e "${cyan}Option 2:${nocolor}"
-echo -e "Just skip... Phoniebox will work well without display control!"
-echo -e " "
-options=("Option 1: Replace service for disyplay control" "Option 2: Skip")
 
-select opt in "${options[@]}"
-do
-    case $opt in
-        "Option 1: Deactivate GPIO Pin 3")
-			echo -e " "
-			sudo service phoniebox-gpio-buttons stop > /dev/null 2>&1
-            sudo sed -i -e "s:shut = Button(3, hold_time=2):#shut = Button(3, hold_time=2):g" /home/pi/RPi-Jukebox-RFID/scripts/gpio-buttons.py > /dev/null
-			sudo service phoniebox-gpio-buttons start > /dev/null 2>&1
-			echo -e "   --> Button replacement finished"
-			echo -e ""
-            break
-            ;;
-        "Option 1: Replace service for disyplay control")
-			echo -e " "
-			echo -e -n "   --> Delete old Service:                "
-			#sudo chmod +x ${installPath}/scripts/gpio-buttons/gpio-buttons.py > /dev/null
-			sudo service phoniebox-gpio-buttons stop > /dev/null 2>&1
-			sudo systemctl disable phoniebox-gpio-buttons > /dev/null  2>&1
-			sudo systemctl disable phoniebox-gpio-control.service > /dev/null  2>&1
-			sudo rm /etc/systemd/system/phoniebox-gpio-buttons.service > /dev/null  2>&1
-			echo -e "${green}Done${nocolor}"
-			echo -e -n "   --> Installing Service:                "
-			sudo cp ${installPath}/templates/gpio-service.template /etc/systemd/system/phoniebox-gpio-buttons.service > /dev/null 2>&1
-			sudo sed -i -e "s:<PATH>:${installPath}:g" /etc/systemd/system/phoniebox-gpio-buttons.service > /dev/null 2>&1
-			sudo chown root:root /etc/systemd/system/phoniebox-gpio-buttons.service > /dev/null 2>&1
-			sudo chmod 644 /etc/systemd/system/phoniebox-gpio-buttons.service > /dev/null 2>&1
-			sudo systemctl enable phoniebox-gpio-buttons > /dev/null 2>&1
-			sudo service phoniebox-gpio-buttons start > /dev/null 2>&1
-			echo -e "${green}Done${nocolor}"
-			echo -e ""
-			echo -e "${yellow}Please edit the button configuration to match your${nocolor}"
-			echo -e "${yellow}hardware! Config file:${nocolor}"
-			echo -e "${yellow}/home/pi/oled_phoniebox/scripts/gpio-buttons/gpio-buttons.py${nocolor}"
-			echo -e ""
-            break
-            ;;
-        "Option 2: Skip")
-			break
-            ;;
-        *) echo -e "Invalid option $REPLY";;
-    esac
-done
-echo -e ""
-read -n 1 -s -r -p "Press any key to continue"
-
-clear
 echo -e ""
 echo -e "/////////////////////////////////////////////////////////////////////////////////////////////////////////"
 echo -e "///                                                                                                   ///"
