@@ -1,7 +1,7 @@
 #!/bin/bash
 # Colors: \e[36m=Cyan M ; \e[92m=Light green ; \e[91m=Light red ; \e[93m=Light yellow ; \e[31m=green ; \e[0m=Default ; \e[33m=Yellow ; \e[31m=Red
 
-repo="https://github.com/Nexodaru/oled_phoniebox"
+repo="https://github.com/Nexodaru/phoniebox_oled_and_utility"
 branch="master"
 
 nocolor='\e[0m'
@@ -222,12 +222,12 @@ for p in "${packages[@]}"; do
 done
 lumaPackages=(luma.core luma.oled netifaces)
 for p in "${lumaPackages[@]}"; do
-  install_python_package p
+  install_python_package "$p"
 done
 
 additionalPythonPackages=(pillow python-mpd2 RPi.GPIO)
 for p in "${additionalPythonPackages[@]}"; do
-  install_python_package p
+  install_python_package "$p"
 done
 
 echo -e ""

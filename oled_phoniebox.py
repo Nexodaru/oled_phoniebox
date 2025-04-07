@@ -1,71 +1,35 @@
 #!/usr/bin/python3
 # -*- coding: utf-8 -*-
+import base64
+import configparser
+import io
+import math
+import os
+import re
+import signal
+import sys
+from datetime import timedelta
+from enum import Enum
+from time import sleep
 
+import RPi.GPIO as GPIO
 from PIL import ImageFont, Image, ImageDraw
-from luma.core.render import canvas
 from luma.core import cmdline, error
 from luma.core.image_composition import ImageComposition, ComposableImage
-from time import sleep
-from datetime import timedelta
+from luma.core.render import canvas
 from mpd import MPDClient
-import base64
-import re
-import os
-import io
-import sys
-import signal
-import configparser
-import math
-import RPi.GPIO as GPIO
-
-# GPIO16 mutes the power stage.
-# GPIO26 shuts down the power stage.
-# $ raspi-gpio get | egrep '16|26'
-# GPIO 16: level=1 fsel=0 func=INPUT
-# GPIO 26: level=1 fsel=0 func=INPUT
-# off
-# raspi-gpio set 16 op # output
-# raspi-gpio set 26 op
-# on
-# raspi-gpio set 26 ip
-# raspi-gpio set 16 ip # input
-
 
 # disable warning when a pin is not in IN state on first use. gpio configuration is out of scope of this script and bad initial state does happen
 GPIO.setwarnings(False)
 GPIO.setmode(GPIO.BCM)
 
 
-# if the pins are not configured, do nothing
-def disable_hifiberry():
-    if not "mute" in config["HIFIBERRY"] or not "power" in config["HIFIBERRY"]:
-        return
-
-    GPIO.setup(config["HIFIBERRY"]["mute"], GPIO.OUT)
-    sleep(0.5)
-    GPIO.setup(config["HIFIBERRY"]["power"], GPIO.OUT)
+class MpdStatus(Enum):
+    PLAY = 1
+    PAUSE = 2
+    STOP = 3
 
 
-def enable_hifiberry():
-    if not "mute" in config["HIFIBERRY"] or not "power" in config["HIFIBERRY"]:
-        return
-
-    GPIO.setup(config["HIFIBERRY"]["power"], GPIO.IN)
-    sleep(0.5)
-    GPIO.setup(config["HIFIBERRY"]["mute"], GPIO.IN)
-
-
-# LED control. This is a non-feature really. Originally there was a startup service to control the button leds,
-# which used sleep timing during startup to display sort of an animation until mpd was up. What a horrible idea.
-# More so on a single core RPi zero. Even more so with a status display at hand. Wasting 5 GPIO pins and hugely complicating the interior in the process.
-# Wiring them together (even in 2 or 3 groups) and using PWM to 'animate' something would have been acceptable. Maybe.
-# The other issue with those LEDs is... you can choose between too bright at night or too dim during the day with a hardwired resistor. Or lean towards the right brightness
-# in daylight (but which one, indoors, outdoors, summer, winter....) and then PWM them down. But based on what? An extra photodiode? Not even my phone gets it 100% right. Extra Buttons?
-# Remember kids should be able to do that on their own. And wanting to.
-# I could imagine wiring them together and hooking them up directly to the usb battery with a potentiometer dial somewhere on the side, going full analog and removing the need to deal with it on the RPi.
-# But at the end of the day, why bother. They add nothing in terms of UI. Not even illumination itself is a feature. I could operate my philips roller in pitch black when i was 3 years old.
-# https://upload.wikimedia.org/wikipedia/commons/a/a7/Philips-roller.jpg
-# Using no LEDs is the best option IMHO. Still, here we are.
 # TODO change this later. we wanna use splitties led service or implement some other stuff in this repo entirely.
 def enable_leds():
     for pin in config["LEDS"]:
@@ -88,8 +52,8 @@ def disable_leds():
 # then did base64 -w 0 on the images
 def get_logo():
     logo = {
-        "card": "iVBORw0KGgoAAAANSUhEUgAAAIAAAABAAQMAAADoGO08AAAABlBMVEUAAAD///+l2Z/dAAAACXBIWXMAAB7CAAAewgFu0HU+AAAAUUlEQVQ4jWNgGMyA8T8YNMAFmCECB+AC7BCBB3ABfojAB0oE5CECP6isAkigqgALkKaCGu7Y//8vxe5gYGClQ4gNWRWEBTASLkbSxkj8gxEAAIJlKJ3Y53v8AAAAAElFTkSuQmCC",
-        "music_note": "iVBORw0KGgoAAAANSUhEUgAAAIAAAABAAQMAAADoGO08AAAABlBMVEUAAAD///+l2Z/dAAAACXBIWXMAAB7CAAAewgFu0HU+AAAAYklEQVQ4jWNgoCdg/P+/AV3gAIoAMzEqDqCraCCognJbfjCgAmZ0gVEV+FUw/0YT4P+PJiCPLlBPUOA/mgAjLQSYidHygUQBoNMfoArUoyU5BntMgQZUAf5/qHwGpi8MdAUATb1mLPOSjm4AAAAASUVORK5CYII=",
+        "card": "iVBORw0KGgoAAAANSUhEUgAAAIAAAABACAIAAABdtOgoAAAACXBIWXMAAA7DAAAOwwHHb6hkAAAB+ElEQVR42u2aWRLCMAxDe/9L9ijwxzCQxWuW5ukLmLakkmvLTq8LAAAAAAAAAMAvXhXATBazcsBhCq1dus8VIJVWw0pgPz0/1C61pQBOdqY8+A8RICRabffsZGp7AdoUqySZIkDtChsIYMgYbT0M9xyiWfFGlhYgMFk7q2uRSsP6txEgtUmxCWA7vcj40gKM6Q9V19eGf/v4pXuxYatxCqCqq3sIMHgdWgGKJ/6sWfL58/W+71Wy0FJtkSqfFMX4N1rdkJ8mgJ/6AROYbgKpla6uBjMFiIr6YQLIHwKVbKMFSJ1wBXZqWgEkdXhyK5BnLtsCaKdGfldjcLHpAvgnl0IBvgugs+9t/2LOYPuNgySTNeGRHtXN5l3yuOw3ENXGuG36pp3qmF3DxnsyeX4pI04ftSk2RbDT92SGNQ0jmTroxQjb8GdYPTtCAINvyTALh76Ype2YosiF+pSYhdmZvENdIt2zyvIpdHedPgJEDo6E73IhQHywtycKjWF9kjc9xVlKBr+GsR0CVBmpZRvbvgcCqIcncmMjZ19Vn8+lXh7UEgYl+1ZQb99K1ab+VV7dWYp6oWU0JHfJhj7Jv5AotOdSWsPGMk4BiOsq7+aSkPFHB80M/C2Yx+HAe0rWItWk2wkMTHy6iGqM8TVPeMIAAAAAAAAAYGG8AQ2n/iAeMyP8AAAAAElFTkSuQmCC",
+        "music_note": "iVBORw0KGgoAAAANSUhEUgAAAIAAAABACAIAAABdtOgoAAAACXBIWXMAAAsSAAALEgHS3X78AAAC7UlEQVR42u2c23LDIAxE/f8/nc5k+tAmRqxWWoFt8dja2HDQ6gLxccza692ObqtaA2gAw7eatgZQPeP3BHChJa8DsAzq/gDUhvv3QQswbAWgXjm/+6lm8GQAtoU1AC2AMolrAGQPRQwe7gMawL4AiianAayJrxvAdhnmYwGsHPs+MHYDUBeDjvLAYhgNYG4cDWDZsAkS3gE0AMZn3ADAqJ9NAeDqVAAg65rrAUBILAfgUterAkh02qe3BDfI0gHke0FReEPA+N6TwiXu9PpcC/AmTP/+W58Dn27y5W72gtFzHMBpV8j6+P37ks3u6ZvRC9brA+i9ZcT+bBfISFAWDOJeqRM2RjS1JOTp/DpGhIyAIQLwYTHEO5xaHhcRIEhUmbDL/LMA0O/gLUSO9GTq1ZglSMeL9lrIBcB5L9C1TEUGUa0RgDWJGCdciDdygU8BAKYX3xejs5pbURmRwNf1SL4IF4cH7EQgByYl+TVLPD4xli0RBHMAkHvxg1n2iEgXqANAKHhuSXwk4pw7GcmLEdqusQDEHZWddkaGOVJLwgkPzaIyEzbcowIAKO6cD8DDGysGxdOHlHmJAHA5eSIkRdTMUeQx5xANcLhhezukt/6DeTgxy9OixSiUYN42uB/pKsHjGT8972AhCMx4T3uwY1A5gIh9iLb+QQcQiYKQ7IQcQm7gMR0GGFkrQiBOgkar2+7kc8gJNWuN4at3hMCoMV3HHAtTGnrXJBy2bkQebRdEHQpc/EtPnda9Yi2yk+EKST+fe3UA9DymJBCRl0cBJCalib845PbWI2mdynaRiU6hgtupaDct3bJz+kk5AIJnMfQw4oe6FAc7hNFCoi57iyecbtQAyHeN9R+7KKi8ik56SfKSsvQH2apOH4itYFt8/6byLKIi+SJim2O3VnAEWgHgbh9mkkqZTm165lEx7akXTqsawA2/BKeoZylKFw+d932w3V9qFBIRrCm1T11QUOp2mYy6W4cr3bp1y2o/Mlebfph8u10AAAAASUVORK5CYII=",
         "pause": "iVBORw0KGgoAAAANSUhEUgAAAIAAAABAAQMAAADoGO08AAAABlBMVEUAAAD///+l2Z/dAAAACXBIWXMAAB7CAAAewgFu0HU+AAAAJklEQVQ4jWNgGFpA/v8P/v8/kATs//+Q//9nVGBUYFgIICftoQAAWYK9iYl2zxoAAAAASUVORK5CYII=",
         "pause_circle": "iVBORw0KGgoAAAANSUhEUgAAAIAAAABAAQMAAADoGO08AAAABlBMVEUAAAD///+l2Z/dAAAACXBIWXMAAB7CAAAewgFu0HU+AAAAr0lEQVQ4ja2TQQ7DIAwEQTlw5Al5Sp6WPC1P4Qkcc6i6hVAp3iVtqiq+eWTwYtbO/R1ewfzkPAArgQhsBCbgQQAlqEcFiwFDBYnvBLIC22Y6BVbrrAAQIQp8A4eyoYH1K4jZai/jCUlAVBCyfV1sFQTuqthuqLhXadCK9zwuJkbg+l+6r3QfwJH3htktZa08ngLrws64Qa3tWajr16P25aUb+c79vYmAkxMlFgW/xwuNGicFlFNGbAAAAABJRU5ErkJggg==",
         "play": "iVBORw0KGgoAAAANSUhEUgAAAIAAAABAAQMAAADoGO08AAAABlBMVEUAAAD///+l2Z/dAAAACXBIWXMAAB7CAAAewgFu0HU+AAAAgUlEQVQ4jdXSwQnAIAxA0QxQcIHSrOpojuIIHj2IqR7zU3rXm4/wUVTk9HUTUoBMqABtnBiESTBU1QonGmEQUFVDNRmqCxrBV1djcsJXNxSCq66GdU4EqL/R3eA5wsE6wV9OP64vgEnwzdUIz1AIGcDHVjQlhQ9TCGjKg71chBPXC+guVzpvSA/2AAAAAElFTkSuQmCC",
@@ -104,7 +68,8 @@ def get_logo():
 
 def get_config(file):
     base_path = os.path.abspath(os.path.dirname(__file__))
-    font_path = os.path.join(base_path, "fonts", "Bitstream Vera Sans Mono Roman.ttf")  # Tried Inconsolata and VT323, but this one looked better
+    font_path = os.path.join(base_path, "fonts",
+                             "Bitstream Vera Sans Mono Roman.ttf")  # Tried Inconsolata and VT323, but this one looked better
     config = configparser.ConfigParser()
     config.read(os.path.join(base_path, file))
     config_dict = {"PATH": {}, "FONT": {}}
@@ -120,9 +85,8 @@ def get_config(file):
     config_dict["FONT"]["small"] = ImageFont.truetype(font_path, 10)
     config_dict["DISPLAY"]["refresh"] = int(config_dict["DISPLAY"]["refresh"])
 
-    for section in "HIFIBERRY", "LEDS":
-        for key in config_dict[section]:
-            config_dict[section][key] = int(config_dict[section][key])
+    for key in config_dict["LEDS"]:
+        config_dict["LEDS"][key] = int(config_dict["LEDS"][key])
 
     return config_dict
 
@@ -169,16 +133,16 @@ def time_convert(s):
     return result.groups()[0]
 
 
-def mpc_state_convert(s):
+def mpd_state_convert(s):
     state = {
-        "play": 2,
-        "pause": 1,
-        "stop": 0,
+        "play": MpdStatus.PLAY,
+        "pause": MpdStatus.PAUSE,
+        "stop": MpdStatus.STOP,
     }
     return state[s]
 
 
-def mpc_file_convert(s):
+def mpd_file_convert(s):
     name = {
         #
         "artist": "",
@@ -187,14 +151,14 @@ def mpc_file_convert(s):
     }
 
     result = re.search(r"^(.+)/([^/]+)\.[^.]+$", s)  # Kinderlieder/Kinderlieder Klassiker/1/Track.02.mp3
-    if result.groups()[0].startswith("http"):
+    if not result or result.groups()[0].startswith("http"):
         return name
     name["artist"] = result.groups()[0]
     name["title"] = result.groups()[1]
     return name
 
 
-def mpc_get_data(key, data, altdata):
+def mpd_get_data(key, data, altdata):
     if key in data:
         return data[key]
 
@@ -204,7 +168,7 @@ def mpc_get_data(key, data, altdata):
     return ""
 
 
-def mpc_get_alt_data(data):
+def mpd_get_alt_data(data):
     alt_data = {
         "song": -1,
         "playlistlength": 0,
@@ -218,32 +182,32 @@ def mpc_get_alt_data(data):
 
     if "file" in data:
         alt_data["file"] = data["file"]
-        alt_data.update(mpc_file_convert(data["file"]))
+        alt_data.update(mpd_file_convert(data["file"]))
 
     return alt_data
 
 
-def mpc_get_track_num_current(key, data, alt_data):
-    return int(mpc_get_data(key, data, alt_data)) + 1
+def mpd_get_track_num_current(key, data, alt_data):
+    return int(mpd_get_data(key, data, alt_data)) + 1
 
 
-def mpc_get_track_num_total(key, data, alt_data):
-    return int(mpc_get_data(key, data, alt_data))
+def mpd_get_track_num_total(key, data, alt_data):
+    return int(mpd_get_data(key, data, alt_data))
 
 
-def mpc_get_track_time(key, data, alt_data):
-    return time_convert(mpc_get_data(key, data, alt_data))
+def mpd_get_track_time(key, data, alt_data):
+    return time_convert(mpd_get_data(key, data, alt_data))
 
 
-def mpc_get_track_time_percent(data, alt_data):
-    current_seconds = float(mpc_get_data("elapsed", data, alt_data))
-    total_seconds = float(mpc_get_data("duration", data, alt_data))
+def mpd_get_track_time_percent(data, alt_data):
+    current_seconds = float(mpd_get_data("elapsed", data, alt_data))
+    total_seconds = float(mpd_get_data("duration", data, alt_data))
     percent = 100 / total_seconds * current_seconds
     return percent
 
 
-def mpc_client():
-    mpdc.connect(config["MPD"]["socket"])
+def mpd_client():
+    mpdc.connect(config["MPD"]["host"], int(config["MPD"]["port"]))
     # {'volume': '30', 'repeat': '0', 'random': '0', 'single': '0', 'consume': '0', 'partition': 'default', 'playlist': '12', 'playlistlength': '5', 'mixrampdb': '0.000000', 'state': 'play', 'song': '0', 'songid': '56',
     # 'time': '26:79', 'elapsed': '26.377', 'bitrate': '320', 'duration': '78.968', 'audio': '44100:24:2', 'nextsong': '1', 'nextsongid': '57'}
     # of those, volume, playlistlength, state (play, pause, stop), song (currently playing song in list, starts with 0), elapsed and duration are of interest.
@@ -256,19 +220,19 @@ def mpc_client():
     mpdc.close()
     mpdc.disconnect()
 
-    alt_data = mpc_get_alt_data(song)
+    alt_data = mpd_get_alt_data(song)
     return {
-        "status": mpc_state_convert(status["state"]),
+        "status": mpd_state_convert(status["state"]),
         "volume": status["volume"],
-        "track_num_current": mpc_get_track_num_current("song", status, alt_data),
-        "track_num_total": mpc_get_track_num_total("playlistlength", status, alt_data),
-        "track_time_elapsed": mpc_get_track_time("elapsed", status, alt_data),
-        "track_time_total": mpc_get_track_time("duration", status, alt_data),
-        "track_time_percent": mpc_get_track_time_percent(status, alt_data),
-        "file_path": mpc_get_data("file", song, alt_data),
-        "artist": mpc_get_data("artist", song, alt_data),
-        "title": mpc_get_data("title", song, alt_data),
-        "album": mpc_get_data("album", song, alt_data),
+        "track_num_current": mpd_get_track_num_current("song", status, alt_data),
+        "track_num_total": mpd_get_track_num_total("playlistlength", status, alt_data),
+        "track_time_elapsed": mpd_get_track_time("elapsed", status, alt_data),
+        "track_time_total": mpd_get_track_time("duration", status, alt_data),
+        "track_time_percent": mpd_get_track_time_percent(status, alt_data),
+        "file_path": mpd_get_data("file", song, alt_data),
+        "artist": mpd_get_data("artist", song, alt_data),
+        "title": mpd_get_data("title", song, alt_data),
+        "album": mpd_get_data("album", song, alt_data),
     }
 
 
@@ -387,12 +351,7 @@ def update_counter(max_count, count):
 
 
 def update_state(state):
-    state["count"], do_update = update_counter(2, state["count"])
-
-    if not do_update:
-        return state
-
-    mpc = mpc_client()
+    mpc = mpd_client()
 
     # the if statements here indicate distinct events, where actions could be added
     if mpc["status"] != state["status"]:
@@ -411,7 +370,8 @@ def update_state(state):
         state["artist"] = mpc["artist"]
 
     # below are non-events
-    if mpc["file_path"].startswith("http"):  # what is in track_time_percent or others when there is a stream running? i doubt this file check is good
+    if mpc["file_path"].startswith(
+            "http"):  # what is in track_time_percent or others when there is a stream running? i doubt this file check is good
         state["progress"] = device.width
     else:
         state["progress"] = int(math.ceil(device.width * mpc["track_time_percent"] / 100))
@@ -430,7 +390,7 @@ def pad_state(state):
             padding = ""
         state["volume"] = "V" + padding + str(state["volume"])
 
-    if state["status"] == 1:
+    if state["status"] == MpdStatus.PAUSE:
         state["track_time_elapsed"] = "PAUSE"
     else:
         if len(state["track_time_elapsed"]) == 4:
@@ -454,28 +414,44 @@ def pad_state(state):
 
     return state
 
-# The script utilizes 5-10% CPU on a RPi zero when updating the display. lets try to be as aggressive with power saving as possible.
-# Little delays are acceptable (sound and display). The device will mostly be idle, or playing continously without anyone interacting.
-# So I opt for saving power at all costs when idle and not going overboard during playback.
-def save_power(state):
-    if state["status"] != 2 and state["save_power"] == 1:  # no need to render old state if nothing happens
-        return 1
 
-    if state["status"] != 2 and state["save_power"] == 0:
-        state["hifiberry_shutdown_wait"], state["save_power"] = update_counter(10, state["hifiberry_shutdown_wait"])
-        if state["save_power"] == 1:
-            disable_hifiberry()
-            if state["status"] == 0:
-                draw_logo("card")
-            return 1
+def sleep_configured_refresh_time():
+    sleep(config["DISPLAY"]["refresh"])
 
-    if state["status"] == 2 and state["save_power"] == 1:  # reenable sound
-        enable_hifiberry()
-        state["save_power"] = 0
-        state["hifiberry_shutdown_wait"] = 0
 
+"""
+:returns true if any change detected
+"""
+
+
+def draw_logos_on_status_change(old_state, current_state):
+    if old_state["status"] != current_state["status"]:
+        if current_state["status"] == MpdStatus.PLAY:
+            draw_logo("play")
+            return True
+        elif current_state["status"] == MpdStatus.PAUSE:
+            draw_logo("pause")
+            return True
+        elif current_state["status"] == MpdStatus.STOP:
+            draw_logo("card")
+            return True
+
+    if parse_volume(current_state["volume"]) > parse_volume(old_state["volume"]):
+        draw_logo("volume")
+        return True
+    if parse_volume(current_state["volume"]) < parse_volume(old_state["volume"]):
+        draw_logo("volume")
+        return True
+
+    return False
+
+
+def parse_volume(volume) -> int:
+    if type(volume) is str:
+        return int(volume[1:]) if volume.startswith("V") else int(volume)
+    if type(volume) is int:
+        return volume
     return 0
-
 
 def main():
     image_composition = ImageComposition(device)
@@ -483,7 +459,7 @@ def main():
     current_display = {}
     current_state = {
         #
-        "status": 0,
+        "status": MpdStatus.STOP,
         "volume": 0,
         "track_num_current": 0,
         "track_num_total": 0,
@@ -497,18 +473,25 @@ def main():
         "progress": 0,
         "id": ".",
         "count": 0,
-        "hifiberry_shutdown_wait": 0,
-        "save_power": 0,
     }
 
     try:
         while True:
+            old_state = current_state.copy()
+            # current_state["count"], do_update = update_counter(2, current_state["count"])
+            # if do_update:
+            #     current_state = update_state(current_state)
+
             current_state = update_state(current_state)
-            if save_power(current_state):
-                sleep(config["DISPLAY"]["refresh"])  # take a nap. continue would skip that otherwise.
+            status_change_detected: bool = draw_logos_on_status_change(old_state, current_state)
+
+            if current_state["status"] == MpdStatus.STOP and not status_change_detected:
+                draw_logo("card")
+                sleep_configured_refresh_time()  # take a nap. continue would skip that otherwise.
                 continue
 
-            current_display = update_images(current_display, image_composition, coordinates, pad_state(current_state.copy()))
+            current_display = update_images(current_display, image_composition, coordinates,
+                                            pad_state(current_state.copy()))
 
             with canvas(device, background=image_composition()) as draw:
                 image_composition.refresh()
@@ -516,14 +499,16 @@ def main():
                     draw.line(line[0:4], fill="white")
                 # progress bar
                 draw.line(
-                    (coordinates["progress1_start"][0], coordinates["progress1_start"][1], current_state["progress"], coordinates["progress1_start"][1]),
+                    (coordinates["progress1_start"][0], coordinates["progress1_start"][1], current_state["progress"],
+                     coordinates["progress1_start"][1]),
                     fill="white",
                 )
                 draw.line(
-                    (coordinates["progress2_start"][0], coordinates["progress2_start"][1], current_state["progress"], coordinates["progress2_start"][1]),
+                    (coordinates["progress2_start"][0], coordinates["progress2_start"][1], current_state["progress"],
+                     coordinates["progress2_start"][1]),
                     fill="white",
                 )
-            sleep(1)
+            sleep(config["DISPLAY"]["refresh"])
     except KeyboardInterrupt:
         pass
 

@@ -4,12 +4,8 @@ controller = <controllervalue>
 refresh = 2
 
 [MPD]
-socket = /run/mpd/socket
-
-[HIFIBERRY]
-# GPIO pins. remove keys to disable.
-mute = 16
-power = 26
+host = localhost
+port = 6600
 
 [LEDS]
 # turn on LEDs. remove keys to disable
