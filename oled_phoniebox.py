@@ -351,7 +351,10 @@ def update_counter(max_count, count):
 
 
 def update_state(state):
-    mpc = mpd_client()
+    try:
+        mpc = mpd_client()
+    except:
+        return state
 
     # the if statements here indicate distinct events, where actions could be added
     if mpc["status"] != state["status"]:
