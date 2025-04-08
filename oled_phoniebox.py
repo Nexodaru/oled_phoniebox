@@ -364,13 +364,14 @@ def update_state(state):
     if mpc["volume"] != state["volume"]:
         state["volume"] = mpc["volume"]
 
-    current_id = mpc["artist"] + mpc["title"] + str(mpc["track_num_current"]) + mpc["track_time_total"]
+    artists: str = ",".join(mpc["artist"]) if isinstance(mpc["artist"], (list, tuple)) else mpc["artist"]
+    current_id = artists + mpc["title"] + str(mpc["track_num_current"]) + mpc["track_time_total"]
 
     if current_id != state["id"]:  # track change
         state["id"] = current_id
         state["album"] = mpc["album"]
         state["title"] = mpc["title"]
-        state["artist"] = mpc["artist"]
+        state["artist"] = artists
 
     # below are non-events
     if mpc["file_path"].startswith(
@@ -422,11 +423,6 @@ def sleep_configured_refresh_time():
     sleep(config["DISPLAY"]["refresh"])
 
 
-"""
-:returns true if any change detected
-"""
-
-
 def draw_logos_on_status_change(old_state, current_state):
     if old_state["status"] != current_state["status"]:
         if current_state["status"] == MpdStatus.PLAY:
@@ -456,6 +452,7 @@ def parse_volume(volume) -> int:
         return volume
     return 0
 
+
 def main():
     image_composition = ImageComposition(device)
     coordinates = get_coordinates()
@@ -481,10 +478,6 @@ def main():
     try:
         while True:
             old_state = current_state.copy()
-            # current_state["count"], do_update = update_counter(2, current_state["count"])
-            # if do_update:
-            #     current_state = update_state(current_state)
-
             current_state = update_state(current_state)
             status_change_detected: bool = draw_logos_on_status_change(old_state, current_state)
 
